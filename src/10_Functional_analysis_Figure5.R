@@ -42,7 +42,7 @@ kegg_ref <-
   mutate(feature = str_remove(pathway, " \\[PATH:[a-z]+[0-9]+\\]")) |> 
   mutate(feature = str_replace_all(feature, ",|\\s|\\-|/|\\(|\\)", "_")) |>
   distinct(broad, subcategory, feature) |> 
-  rename(category = subcategory)
+  dplyr::rename(category = subcategory)
 
 # Biosynthetic Gene Cluster
 bgc_ref <- 
@@ -67,7 +67,7 @@ tss_ref2 <-
 cazyme_ref <-
   read_rds(here("data_input", "cazyme.df")) |> 
   distinct(class, type) |> 
-  rename(category = class, feature = type) |> 
+  dplyr::rename(category = class, feature = type) |> 
   mutate(broad = "CAZyme")
 
 # Functional Datasets -----------------------------------------------------
@@ -84,7 +84,7 @@ colnames(KEGG) <- str_replace_all(colnames(KEGG), ",|\\s|\\-|/|\\(|\\)", "_")
 BGC <- 
   read_csv(here("data_input", "bcg.csv"), show_col_types = FALSE) |>
   mutate(product = str_replace_all(product, "-", "_")) |> 
-  rename(strain = Strain) |> 
+  dplyr::rename(strain = Strain) |> 
   group_by(strain, product) |>
   tally() |>
   mutate(product = ifelse(grepl("^[A-Z]", product), product, str_to_title(product))) |> 
@@ -122,7 +122,7 @@ categories.features <-
 list.features <- list(ac_taxa, KEGG, BGC, TSS, CAZyme)
 
 feature.df <-
-  reduce(list.features, left_join, by = "strain") |>
+  purrr::reduce(list.features, left_join, by = "strain") |>
   filter(strain %in% ac_list$strain) |> 
   mutate(across(where(is.numeric), ~ replace_na(.x, 0)))
 
@@ -154,12 +154,12 @@ phylo_lm <-
 sig_tab <- 
   map_df(good_traits, ~ sig_one(tr_trim, ac_df2, .x)) |> 
   mutate(FDR_lambda = p.adjust(p_value, method = "fdr")) |> 
-  rename(raw_lambda = lambda, p_lambda = p_value)
+  dplyr::rename(raw_lambda = lambda, p_lambda = p_value)
 
 # Combine
 trait.df <- 
   list(categories.features, phylo_lm, sig_tab) |> 
-  reduce(left_join, "feature") |> 
+  purrr::reduce(left_join, "feature") |> 
   na.exclude() |> 
   mutate(
     feature = case_when(
@@ -186,31 +186,17 @@ pc <- prcomp(X, scale. = FALSE)
 scores <- 
   as.data.frame(pc$x[,1:2]) |> 
   rownames_to_column(var = "strain") |> 
-  left_join(ac.df, by = "strain")
+  left_join(ac_df, by = "strain")
 
 apply(pc$x[,1:2], 2, function(pcaxis)
   phytools::phylosig(tr_trim, pcaxis, method = "lambda", test = TRUE)$lambda)
 
-fit <- lm.rrpp(X ~ ac_df2$Compartment, Cov = vcv.phylo(tr_trim), iter = 999)
+fit <- lm.rrpp(X ~ ac_df$Compartment, Cov = vcv.phylo(tr_trim), iter = 999)
 anova(fit)
 
 # Plot --------------------------------------------------------------------
 
 figure5a <-
-  trait.df |> 
-  filter(p_value < 0.05) |> 
-  ggplot(aes(x = estimate, y = reorder(feature, estimate))) +
-  geom_vline(xintercept = 0, linetype = "dashed") +
-  geom_segment(aes(x = conf_low, xend = conf_high, yend = feature)) +
-  geom_point() +
-  theme_bw() +
-  scale_y_discrete(position = "right") +
-  guides(colour = "none") +
-  labs(
-    y = "",
-    x = expression(paste("Effect size (", beta  %+-% CI, ")")))
-
-figure5b <-
   trait.df |> 
   filter(FDR_lambda < 0.05) |>
   ggplot(aes(x = raw_lambda, y = fct_reorder(category, raw_lambda))) +
@@ -224,6 +210,20 @@ figure5b <-
     y = "",
     x = expression(paste("Pagel's ", lambda)))
 
+figure5b <-
+  trait.df |> 
+  filter(p_value < 0.05) |> 
+  ggplot(aes(x = estimate, y = reorder(feature, estimate))) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  geom_segment(aes(x = conf_low, xend = conf_high, yend = feature)) +
+  geom_point() +
+  theme_bw() +
+  scale_y_discrete(position = "right") +
+  guides(colour = "none") +
+  labs(
+    y = "",
+    x = expression(paste("Effect size (", beta  %+-% CI, ")")))
+
 figure5c <-
   ggplot(scores, aes(x = PC1, y = PC2)) +
   geom_point(aes(fill = Compartment), size = 2, pch = 21, alpha = 0.8) +
@@ -235,8 +235,8 @@ figure5c <-
 
 # Compile plots -----------------------------------------------------------
 
-figure5 <-
-  free(figure5a) / free(figure5b) / free(figure5c) +
+plt_figure5 <-
+  free(figure5a) + free(figure5b / figure5c) +
   plot_annotation(tag_levels = "A") &
   theme(
     axis.title.y = element_text(margin = margin(r = 2)),
@@ -251,5 +251,8 @@ figure5 <-
 
 # Output ------------------------------------------------------------------
 
-ggsave(plot = figure5, 
-       here("output", "Figure5.tiff"), dpi = 300, width = 12, height = 6)
+mapply(function(x) 
+  ggsave(x, 
+         plot = plt_figure5, 
+         dpi = 300, width = 12, height = 6),
+  x = c(here("output", "Figure5.png"), here("output", "Figure5.eps")))

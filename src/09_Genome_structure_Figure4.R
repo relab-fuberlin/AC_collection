@@ -44,7 +44,7 @@ phage <- read_rds(here("data_input", "phage.rds"))
 phage.category <- data.frame(category = "Phage", feature = names(phage))
 
 # Plasmids
-plasmid <- readRDS(here("data_input", "plasmids.rds")) |> rename("Plasmid" = n, "strain" = Strain)
+plasmid <- readRDS(here("data_input", "plasmids.rds")) |> dplyr::rename("Plasmid" = n, "strain" = Strain)
 plasmid.category <- data.frame(category = "Plasmid", feature = names(plasmid))
 
 # Combine datasets --------------------------------------------------------
@@ -56,7 +56,7 @@ categories.features <-
 list.features <- list(ac_taxa, genome, phage, plasmid)
 
 feature.df <-
-  reduce(list.features, left_join, by = "strain") |>
+  purrr::reduce(list.features, left_join, by = "strain") |>
   filter(strain %in% ac_list$strain) |> 
   mutate(across(where(is.numeric), ~ replace_na(.x, 0)))
 
@@ -85,12 +85,12 @@ phylo_lm <-
 sig_tab <- 
   map_df(num_feats, ~ sig_one(tr_trim, ac_df, .x)) |> 
   mutate(FDR_lambda = p.adjust(p_value, method = "fdr")) |> 
-  rename(raw_lambda = lambda, p_lambda = p_value)
+  dplyr::rename(raw_lambda = lambda, p_lambda = p_value)
 
 # Combine
 trait.df <- 
   list(categories.features, phylo_lm, sig_tab) |> 
-  reduce(left_join, "feature") |> 
+  purrr::reduce(left_join, "feature") |> 
   mutate(feature = case_when(
     feature %in% c("GC", "tRNAs", "tmRNAs", "rRNAs", "ncRNAs", "CDSs", "sORFs") ~ feature,
     TRUE ~ str_to_title(feature))) |> 
@@ -110,6 +110,18 @@ trait.df <-
 
 plt_figure4a <-
   trait.df |> 
+  ggplot(aes(y = reorder(feature, estimate))) +
+  facet_grid(rows = vars(category), scales = "free", space = "free") +
+  geom_vline(xintercept = 1, linetype = "dashed") +
+  geom_point(aes(x = raw_lambda, size = -log10(FDR_lambda))) +
+  scale_size_continuous(name = expression(-log[10]~"(p-value)"), range = c(0.5, 3.5)) +
+  theme_bw() +
+  labs(
+    y = "Feature",
+    x = expression(paste("Pagel's ", lambda)))
+
+plt_figure4b <-
+  trait.df |> 
   mutate(signif = ifelse(p_value < 0.05, "sig", "ns")) |> 
   ggplot(aes(x = estimate, y = reorder(feature, estimate), colour = signif)) +
   facet_grid(rows = vars(category), scales = "free", space = "free") +
@@ -121,18 +133,6 @@ plt_figure4a <-
   labs(
     y = "Feature",
     x = expression(paste("Effect size (", beta  %+-% CI, ")")))
-
-plt_figure4b <-
-  trait.df |> 
-  ggplot(aes(y = reorder(feature, estimate))) +
-  facet_grid(rows = vars(category), scales = "free", space = "free") +
-  geom_vline(xintercept = 1, linetype = "dashed") +
-  geom_point(aes(x = raw_lambda, size = -log10(FDR_lambda))) +
-  scale_size_continuous(name = expression(-log[10]~"(p-value)"), range = c(0.5, 3.5)) +
-  theme_bw() +
-  labs(
-    y = "Feature",
-    x = expression(paste("Pagel's ", lambda)))
 
 # Phylogenetic PCA --------------------------------------------------------
 X <- ac_df |> dplyr::select(-strain:-Compartment, -sp)
@@ -170,5 +170,8 @@ plt_figure4 <-
     legend.direction = "horizontal"
   )
 
-ggsave(plot = plt_figure4,
-  here("output", "Figure4.tiff"), dpi = 300, width = 12, height = 5)
+mapply(function(x) 
+  ggsave(x, 
+         plot = plt_figure4, 
+         dpi = 300, width = 12, height = 5),
+  x = c(here("output", "Figure4.png"), here("output", "Figure4.eps")))

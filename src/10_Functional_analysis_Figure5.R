@@ -236,7 +236,8 @@ figure5c <-
 # Compile plots -----------------------------------------------------------
 
 plt_figure5 <-
-  free(figure5a) + free(figure5b / figure5c) +
+  free(figure5a) + wrap_plots(figure5b, figure5c, ncol = 1) +
+  plot_layout(widths = c(2.5, 1)) +
   plot_annotation(tag_levels = "A") &
   theme(
     axis.title.y = element_text(margin = margin(r = 2)),
@@ -254,5 +255,5 @@ plt_figure5 <-
 mapply(function(x) 
   ggsave(x, 
          plot = plt_figure5, 
-         dpi = 300, width = 12, height = 6),
+         dpi = 300, width = 12, height = 5.5),
   x = c(here("output", "Figure5.png"), here("output", "Figure5.eps")))
